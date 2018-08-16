@@ -1,0 +1,16 @@
+{
+    "paths":[
+        {
+            "name":"pathname",
+            "path":"../log.log",
+            "archive":"../archive"
+        }
+    ],
+    "rules":[
+        {
+            "logger":"*",
+            "level":"Info",
+            "file" : "pathname"
+        }
+    ]
+}

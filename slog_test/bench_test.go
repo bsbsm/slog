@@ -36,7 +36,7 @@ func BenchmarkCompareToStdlib(b *testing.B) {
 	})
 
 	b.Run("stdlog", func(b *testing.B) {
-		var w, err = os.OpenFile("../bench_log.stndlog", os.O_APPEND|os.O_CREATE, 0644)
+		var w, err = os.OpenFile("../bench_stndlog.log", os.O_APPEND|os.O_CREATE, 0644)
 
 		if err != nil {
 			panic("file")
@@ -46,32 +46,45 @@ func BenchmarkCompareToStdlib(b *testing.B) {
 
 		l := log.New(w, "", 0)
 
-		var m = "test message for logging in log\n"
+		var m = "test message for logging in log"
 		b.ResetTimer()
+
 		for i := 0; i < b.N; i++ {
 			// same in slog
 			currentTime := time.Now().Local()
+			dateStr := currentTime.Format("01.02.2006 15:04:05.000")
 
-			dateStr := currentTime.Format("01.02.2006 15:04:05")
-
-			var loglevel string
+			var levelStr string
 			switch {
 			case level == 0:
-				loglevel = "Verbose"
+				levelStr = "Verbose"
 			case level == 1:
-				loglevel = "Info"
+				levelStr = "Info"
 			case level == 2:
-				loglevel = "Warning"
+				levelStr = "Warning"
 			case level == 3:
-				loglevel = "Error"
+				levelStr = "Error"
+			default:
+				levelStr = "Unknown"
 			}
 
-			var buf = make([]byte, 28+len(m))
+			arrayLen := 33 + len(m)
+			var buf = make([]byte, arrayLen)
+			_ = buf[32] // bound check trick
+
 			copy(buf, dateStr)
-			copy(buf, " ")
-			copy(buf, loglevel)
-			copy(buf, " ")
-			copy(buf, m)
+			var whitespace byte = 32
+			buf[23] = whitespace
+			buf[27] = whitespace
+			buf[28] = whitespace
+			buf[29] = whitespace
+			buf[30] = whitespace
+			buf[31] = whitespace
+
+			copy(buf[24:], levelStr)
+			copy(buf[32:], m)
+
+			buf[arrayLen-1] = 10 // "\n"
 
 			l.Print(string(buf))
 		}

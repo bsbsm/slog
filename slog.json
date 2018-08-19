@@ -2,8 +2,8 @@
     "paths":[
         {
             "name":"pathname",
-            "path":"../log.log",
-            "archive":"../archive"
+            "path":"./log.log",
+            "archive":"./archive"
         }
     ],
     "rules":[

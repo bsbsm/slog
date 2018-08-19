@@ -6,65 +6,59 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 )
-
-// Log levels
-const (
-	VerboseLevel = iota
-	InfoLevel
-	WarningLevel
-	ErrorLevel
-)
-
-// default values
-const defaultBufferSize int = 512
-const defaultMaxLoggerCount int = 10
-
-// var format string
-// var forceFlush bool
 
 // configuration
 const configPath = "./slog.json"
 
 var config *configuration
 
-// Init is performance a logger initialize
-func Init(maxLoggersCount int, maxWriteBufSize int) (e error) {
+// Init is performance a logger initialize.
+// If loggersCount == -1 then keep default value (10).
+// If maxWriteBufSize == -1 then keep default value (512).
+func Init(loggersCount int, maxWriteBufSize int) (e error) {
 	config, e = readConfiguration(configPath)
 
 	if e != nil {
 		return e
 	}
 
-	loggerNames = make(map[string]int)
+	loggersID = make(map[string]int)
 
-	if maxLoggersCount < 1 {
-		e = errors.New("Minimum loggers count is 1")
-		return e
+	if loggersCount == -1 {
+		loggersCount = defaultLoggersCount
+	} else {
+		if loggersCount < 1 {
+			e = errors.New("Minimum loggers count is 1")
+			return e
+		}
 	}
 
-	if maxWriteBufSize < 8 {
-		e = errors.New("Minimum buffer len is 8")
-		return e
+	if maxWriteBufSize == -1 {
+		bufferSize = defaultBufferSize
+	} else {
+		if maxWriteBufSize < 8 {
+			e = errors.New("Minimum buffer len is 8")
+			return e
+		}
+
+		bufferSize = maxWriteBufSize
 	}
 
-	e = initLoggersArray(maxLoggersCount)
+	e = initLoggersArray(loggersCount)
 
 	if e != nil {
 		return e
 	}
 
-	bufferSize = maxWriteBufSize
-
-	go ArchiveLogFilesLoop(config.paths, config.archives)
-
 	return nil
 }
 
 // CreateLogger is performance a logger initialize
-func CreateLogger(name string, autoFlush bool) *LogHandle {
+func CreateLogger(name string, autoFlush bool) *LogHandler {
 	logFilePath := getFilePath(name)
 	w, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE, 0644)
 	if err != nil {
@@ -78,20 +72,21 @@ func CreateLogger(name string, autoFlush bool) *LogHandle {
 		}
 	}
 
-	return createInstanceLogger(w, getLevel(name), autoFlush)
+	return createInstanceLogger(name, w, getLevel(name), autoFlush)
 }
 
-var loggerNames map[string]int
+// map[LogName]LogID
+var loggersID map[string]int
 
-func GetLogger(name string) (*LogHandle, error) {
+func GetLogger(name string) (*LogHandler, error) {
 	var e error = nil
-	var lg *LogHandle = nil
+	var lg *LogHandler = nil
 	exists := false
 
-	if loggerNames == nil {
-		e = Init(defaultMaxLoggerCount, defaultBufferSize)
+	if loggersID == nil {
+		e = Init(defaultLoggersCount, defaultBufferSize)
 	} else {
-		idx, exists := loggerNames[name]
+		idx, exists := loggersID[name]
 
 		if exists {
 			lg = loggers[idx]
@@ -100,7 +95,7 @@ func GetLogger(name string) (*LogHandle, error) {
 
 	if !exists {
 		lg = CreateLogger(name, true)
-		loggerNames[name] = int(lg.ID)
+		loggersID[name] = int(lg.ID)
 	}
 
 	return lg, e
@@ -108,24 +103,10 @@ func GetLogger(name string) (*LogHandle, error) {
 
 func writeByLogLevel(id uint32, logLevel int, message string, needFlush bool, logName string) {
 	currentTime := time.Now().Local()
-	lw := loggers[id].lastWrite
-	// TODO проверка текущей даты
-	if lw.YearDay() < currentTime.YearDay() {
-		filePath := getFilePath(logName)
-		_, file := path.Split(filePath)
-		di := strings.Index(file, ".")
-		err := os.Rename(filePath, path.Join(config.archives[filePath], file[:di]+lw.Format("02-01-2006")+file[di+1:]))
-		if err != nil {
-			Log(id, []byte("cannot rename file "+filePath))
-		} else {
-			f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE, 0644)
-			if err == nil {
-				loggers[id].writer = bufio.NewWriterSize(f, bufferSize)
-			}
-		}
-	}
 
-	dateStr := currentTime.Format("01.02.2006 15:04:05")
+	archiveLogFile(loggers[id], logName, currentTime)
+
+	dateStr := currentTime.Format("02.01.2006 15:04:05.000")
 
 	var levelStr string
 	switch {
@@ -141,13 +122,23 @@ func writeByLogLevel(id uint32, logLevel int, message string, needFlush bool, lo
 		levelStr = "Unknown"
 	}
 
-	var buf = make([]byte, 28+len(message))
+	arrayLen := 33 + len(message)
+	var buf = make([]byte, arrayLen)
+	_ = buf[32] // bound check trick
 
 	copy(buf, dateStr)
-	copy(buf, " ")
-	copy(buf, levelStr)
-	copy(buf, " ")
-	copy(buf, message)
+	var whitespace byte = 32
+	buf[23] = whitespace
+	buf[27] = whitespace
+	buf[28] = whitespace
+	buf[29] = whitespace
+	buf[30] = whitespace
+	buf[31] = whitespace
+
+	copy(buf[24:], levelStr)
+	copy(buf[32:], message)
+
+	buf[arrayLen-1] = 10 // "\n"
 
 	Log(id, buf)
 
@@ -156,27 +147,96 @@ func writeByLogLevel(id uint32, logLevel int, message string, needFlush bool, lo
 	}
 }
 
+func archiveLogFile(log *LogHandler, logName string, currentTime time.Time) {
+	lw := log.lastWrite
+
+	// last write date check
+	if lw.Year() == 1 || (lw.Year() == currentTime.Year() && lw.YearDay() >= currentTime.YearDay()) {
+		return
+	}
+
+	filePath := getFilePath(logName)
+	_, file := path.Split(filePath)
+
+	// close log file
+	err := log.writeCloser.f.Close()
+	if err != nil {
+		Log(log.ID, []byte(fmt.Sprintf("\t[ERROR] Cannot close file. %s\n", err.Error())))
+		Flush(log.ID)
+		return
+	}
+
+	var needReopen bool
+	var errorText string
+
+	// rename log file
+	var absArchivePath string
+	if filepath.IsAbs(config.archives[filePath]) {
+		absArchivePath = config.archives[filePath]
+	} else {
+		absArchivePath, err = filepath.Abs(config.archives[filePath])
+	}
+
+	if err != nil {
+		needReopen = true
+		errorText = "Cannot resolve absolute path. " + err.Error()
+	} else {
+		if _, err := os.Stat(absArchivePath); os.IsNotExist(err) {
+			os.Mkdir(absArchivePath, os.ModeDir)
+		}
+
+		// index of dot for split
+		di := strings.Index(file, ".")
+
+		err = os.Rename(filePath, path.Join(absArchivePath, file[:di]+lw.Format("_02-01-2006.")+file[di+1:]))
+		if err != nil {
+			needReopen = true
+			errorText = "Cannot rename file. " + err.Error()
+		}
+	}
+
+	if needReopen {
+		f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE, 0644)
+
+		if err == nil && len(errorText) != 0 {
+			Log(log.ID, []byte("\t[ERROR] "+errorText))
+			Flush(log.ID)
+			return
+		} // else Log(log.ID, []byte("\t[ERROR] Cannot re-open file. "+err.Error()))
+
+		log.writeCloser.f = f
+		return
+	}
+
+	// create new log file
+	f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE, 0644)
+	if err == nil {
+		// set logFIleWriteCloser
+		log.writeCloser = &logFileWriteCloser{bufio.NewWriterSize(f, bufferSize), f}
+	}
+}
+
 // Verbose logging a message with VerboseLevel
-func (h *LogHandle) Verbose(message string) {
+func (h *LogHandler) Verbose(message string) {
 	writeByLogLevel(h.ID, VerboseLevel, message, h.autoFlush, h.name)
 }
 
 // Info logging a message with InfoLevel
-func (h *LogHandle) Info(message string) {
+func (h *LogHandler) Info(message string) {
 	writeByLogLevel(h.ID, InfoLevel, message, h.autoFlush, h.name)
 }
 
 // Warn logging a message with WarningLevel
-func (h *LogHandle) Warn(message string) {
+func (h *LogHandler) Warn(message string) {
 	writeByLogLevel(h.ID, WarningLevel, message, h.autoFlush, h.name)
 }
 
 // Error logging a message with ErrorLevel
-func (h *LogHandle) Error(message string) {
+func (h *LogHandler) Error(message string) {
 	writeByLogLevel(h.ID, ErrorLevel, message, h.autoFlush, h.name)
 }
 
 // Log message with minimum log level
-func (h *LogHandle) Log(message string) {
+func (h *LogHandler) Log(message string) {
 	writeByLogLevel(h.ID, h.minLogLevel, message, h.autoFlush, h.name)
 }

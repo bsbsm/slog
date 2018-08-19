@@ -9,10 +9,9 @@ import (
 
 func TestInitToReturnNil(t *testing.T) {
 	actualResult := slog.Init(1, 8)
-	var expectedResult error = nil
 
-	if actualResult != expectedResult {
-		t.Fatalf("Expected %s but got %s", expectedResult, actualResult)
+	if actualResult != nil {
+		t.Fatalf("Expected Nil but got %s", actualResult.Error())
 	}
 }
 

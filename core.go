@@ -3,36 +3,53 @@ package slog
 import (
 	"bufio"
 	"errors"
-	"io"
+	"os"
 	"sync/atomic"
 	"time"
 )
 
-var loggers []*LogHandle
+var loggers []*LogHandler
 var curLoggersID uint32
 
-var bufferSize = 1024
+var bufferSize int
 var loggersCapacity uint32
 
-const maxLoggers = 128
+const maxLoggersLimit = 128
 const anyLogs string = "*"
 
-// LogHandle is named logger
-type LogHandle struct {
+// Log levels
+const (
+	VerboseLevel = iota
+	InfoLevel
+	WarningLevel
+	ErrorLevel
+)
+
+// default values
+const defaultBufferSize int = 512
+const defaultLoggersCount int = 10
+
+// LogHandler is named logger
+type LogHandler struct {
 	ID          uint32
-	writer      *bufio.Writer
+	writeCloser *logFileWriteCloser
 	autoFlush   bool
 	minLogLevel int
 	lastWrite   time.Time
 	name        string
 }
 
+type logFileWriteCloser struct {
+	*bufio.Writer
+	f *os.File
+}
+
 func initLoggersArray(capacity int) error {
-	if capacity > maxLoggers {
+	if capacity > maxLoggersLimit {
 		return errors.New("Too many loggers")
 	}
 
-	loggers = make([]*LogHandle, capacity)
+	loggers = make([]*LogHandler, capacity)
 
 	loggersCapacity = uint32(capacity)
 	curLoggersID = 0
@@ -41,7 +58,7 @@ func initLoggersArray(capacity int) error {
 }
 
 // создавать логгеры по rules. One rule - one logger and copy pointer if requested new loggers with some rule
-func createInstanceLogger(iw io.Writer, minLogLevel int, autoFlush bool) *LogHandle {
+func createInstanceLogger(name string, f *os.File, minLogLevel int, autoFlush bool) *LogHandler {
 	if loggers == nil {
 		panic("Loggers not initiated")
 	}
@@ -52,13 +69,13 @@ func createInstanceLogger(iw io.Writer, minLogLevel int, autoFlush bool) *LogHan
 
 	id := atomic.AddUint32(&curLoggersID, 1) - 1
 
-	w := bufio.NewWriterSize(iw, bufferSize)
-
-	lh := &LogHandle{
+	fw := &logFileWriteCloser{bufio.NewWriterSize(f, bufferSize), f}
+	lh := &LogHandler{
 		ID:          id,
-		writer:      w,
+		writeCloser: fw,
 		autoFlush:   autoFlush,
 		minLogLevel: minLogLevel,
+		name:        name,
 	}
 
 	loggers[id] = lh
@@ -66,19 +83,19 @@ func createInstanceLogger(iw io.Writer, minLogLevel int, autoFlush bool) *LogHan
 	return lh
 }
 
-func getLogger(idx int) *LogHandle {
+func getLogger(idx int) *LogHandler {
 	return loggers[idx]
 }
 
 // Log is writing a message to bufio.Writer
 func Log(id uint32, msg []byte) {
-	loggers[id].writer.Write(msg)
+	loggers[id].writeCloser.Write(msg)
 	loggers[id].lastWrite = time.Now()
 }
 
 // Flush bufio.Writer
 func Flush(id uint32) {
-	loggers[id].writer.Flush()
+	loggers[id].writeCloser.Flush()
 }
 
 func getFilePath(name string) string {

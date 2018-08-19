@@ -9,7 +9,7 @@
     "rules":[
         {
             "logger":"*",
-            "level":"Info",
+            "level":"Verbose",
             "file" : "pathname"
         }
     ]

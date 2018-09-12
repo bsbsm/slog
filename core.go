@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -37,6 +38,7 @@ type LogHandler struct {
 	minLogLevel int
 	lastWrite   time.Time
 	name        string
+	mutex       sync.Mutex
 }
 
 type logFileWriteCloser struct {
@@ -76,6 +78,7 @@ func createInstanceLogger(name string, f *os.File, minLogLevel int, autoFlush bo
 		autoFlush:   autoFlush,
 		minLogLevel: minLogLevel,
 		name:        name,
+		mutex:       sync.Mutex{},
 	}
 
 	loggers[id] = lh
@@ -89,13 +92,18 @@ func getLogger(idx int) *LogHandler {
 
 // Log is writing a message to bufio.Writer
 func Log(id uint32, msg []byte) {
+	loggers[id].mutex.Lock()
 	loggers[id].writeCloser.Write(msg)
+	loggers[id].mutex.Unlock()
+
 	loggers[id].lastWrite = time.Now()
 }
 
 // Flush bufio.Writer
 func Flush(id uint32) {
+	loggers[id].mutex.Lock()
 	loggers[id].writeCloser.Flush()
+	loggers[id].mutex.Unlock()
 }
 
 func getFilePath(name string) string {

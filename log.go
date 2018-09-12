@@ -60,10 +60,21 @@ func Init(loggersCount int, maxWriteBufSize int) (e error) {
 // CreateLogger is performance a logger initialize
 func CreateLogger(name string, autoFlush bool) *LogHandler {
 	logFilePath := getFilePath(name)
-	w, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE, 0644)
-	if err != nil {
-		fmt.Println("Create log file ERROR " + fmt.Sprint(err))
 
+	if !filepath.IsAbs(logFilePath) {
+		logFilePath, _ = filepath.Abs(logFilePath)
+	}
+
+	dirPath := filepath.Dir(logFilePath)
+	if _, err := os.Stat(dirPath); os.IsNotExist(err) || (err != nil && err.Error() == "ENOTDIR") {
+		os.MkdirAll(dirPath, os.ModeDir)
+	}
+
+	w, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		//panic(err)
+		// fmt.Println("Create log file ERROR " + fmt.Sprint(err))
+		os.Create(logFilePath)
 		if os.IsNotExist(err) {
 			err = nil
 			w, err = os.Create(logFilePath)
@@ -155,6 +166,9 @@ func archiveLogFile(log *LogHandler, logName string, currentTime time.Time) {
 		return
 	}
 
+	log.mutex.Lock()
+	defer log.mutex.Unlock()
+
 	filePath := getFilePath(logName)
 	_, file := path.Split(filePath)
 
@@ -181,8 +195,8 @@ func archiveLogFile(log *LogHandler, logName string, currentTime time.Time) {
 		needReopen = true
 		errorText = "Cannot resolve absolute path. " + err.Error()
 	} else {
-		if _, err := os.Stat(absArchivePath); os.IsNotExist(err) {
-			os.Mkdir(absArchivePath, os.ModeDir)
+		if _, err := os.Stat(absArchivePath); os.IsNotExist(err) || (err != nil && err.Error() == "ENOTDIR") {
+			os.MkdirAll(absArchivePath, os.ModeDir)
 		}
 
 		// index of dot for split
@@ -217,26 +231,42 @@ func archiveLogFile(log *LogHandler, logName string, currentTime time.Time) {
 }
 
 // Verbose logging a message with VerboseLevel
+func (h *LogHandler) IsVerbose() bool{
+	return h.minLogLevel == VerboseLevel
+}
+
 func (h *LogHandler) Verbose(message string) {
-	writeByLogLevel(h.ID, VerboseLevel, message, h.autoFlush, h.name)
+	if h.minLogLevel == VerboseLevel {
+		writeByLogLevel(h.ID, VerboseLevel, message, h.autoFlush, h.name)
+	}
 }
 
 // Info logging a message with InfoLevel
 func (h *LogHandler) Info(message string) {
-	writeByLogLevel(h.ID, InfoLevel, message, h.autoFlush, h.name)
+	if h.minLogLevel <= InfoLevel {
+		writeByLogLevel(h.ID, InfoLevel, message, h.autoFlush, h.name)
+	}
 }
 
 // Warn logging a message with WarningLevel
 func (h *LogHandler) Warn(message string) {
-	writeByLogLevel(h.ID, WarningLevel, message, h.autoFlush, h.name)
+	if h.minLogLevel <= WarningLevel {
+		writeByLogLevel(h.ID, WarningLevel, message, h.autoFlush, h.name)
+	}
 }
 
 // Error logging a message with ErrorLevel
 func (h *LogHandler) Error(message string) {
-	writeByLogLevel(h.ID, ErrorLevel, message, h.autoFlush, h.name)
+	if h.minLogLevel <= ErrorLevel {
+		writeByLogLevel(h.ID, ErrorLevel, message, h.autoFlush, h.name)
+	}
 }
 
 // Log message with minimum log level
 func (h *LogHandler) Log(message string) {
 	writeByLogLevel(h.ID, h.minLogLevel, message, h.autoFlush, h.name)
+}
+
+func (h *LogHandler) LogByLevel(level int, message string) {
+	writeByLogLevel(h.ID, level, message, h.autoFlush, h.name)
 }

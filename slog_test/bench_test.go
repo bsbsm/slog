@@ -36,7 +36,7 @@ func BenchmarkCompareToStdlib(b *testing.B) {
 	})
 
 	b.Run("stdlog", func(b *testing.B) {
-		var w, err = os.OpenFile("../bench_stndlog.log", os.O_APPEND|os.O_CREATE, 0644)
+		var w, err = os.OpenFile("../bench_stndlog.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 
 		if err != nil {
 			panic("file")

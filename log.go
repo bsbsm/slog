@@ -162,7 +162,9 @@ func archiveLogFile(log *LogHandler, logName string, currentTime time.Time) {
 	lw := log.lastWrite
 
 	// last write date check
-	if lw.Year() == 1 || (lw.Year() == currentTime.Year() && lw.YearDay() >= currentTime.YearDay()) {
+	if lw.Year() == 1 ||
+		(lw.Year() == currentTime.Year() &&
+			lw.YearDay() >= currentTime.YearDay()) {
 		return
 	}
 
@@ -209,8 +211,9 @@ func archiveLogFile(log *LogHandler, logName string, currentTime time.Time) {
 		}
 	}
 
+	// if was a error then reopen and return
 	if needReopen {
-		f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE, 0644)
+		f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 
 		if err == nil && len(errorText) != 0 {
 			Log(log.ID, []byte("\t[ERROR] "+errorText))
@@ -222,8 +225,8 @@ func archiveLogFile(log *LogHandler, logName string, currentTime time.Time) {
 		return
 	}
 
-	// create new log file
-	f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE, 0644)
+	//create new log file
+	f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err == nil {
 		// set logFIleWriteCloser
 		log.writeCloser = &logFileWriteCloser{bufio.NewWriterSize(f, bufferSize), f}
@@ -231,7 +234,7 @@ func archiveLogFile(log *LogHandler, logName string, currentTime time.Time) {
 }
 
 // Verbose logging a message with VerboseLevel
-func (h *LogHandler) IsVerbose() bool{
+func (h *LogHandler) IsVerbose() bool {
 	return h.minLogLevel == VerboseLevel
 }
 

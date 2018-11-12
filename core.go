@@ -24,6 +24,8 @@ const (
 	InfoLevel
 	WarningLevel
 	ErrorLevel
+
+	NoneLevel
 )
 
 // default values

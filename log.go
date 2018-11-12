@@ -57,8 +57,8 @@ func Init(loggersCount int, maxWriteBufSize int) (e error) {
 	return nil
 }
 
-// CreateLogger is performance a logger initialize
-func CreateLogger(name string, autoFlush bool) *LogHandler {
+// createLogger is performance a logger initialize
+func createLogger(name string, autoFlush bool) *LogHandler {
 	logFilePath := getFilePath(name)
 
 	if !filepath.IsAbs(logFilePath) {
@@ -105,7 +105,7 @@ func GetLogger(name string) (*LogHandler, error) {
 	}
 
 	if !exists {
-		lg = CreateLogger(name, true)
+		lg = createLogger(name, true)
 		loggersID[name] = int(lg.ID)
 	}
 
